@@ -67,10 +67,6 @@ def resize_mscoco():
 def show_examples(batch_idx, batch_size,
                   ### PATH need to be fixed
                   mscoco="inpainting", split="val2014", caption_path="dict_key_imgID_value_caps_train_and_valid.pkl"):
-    '''
-    Show an example of how to read the dataset
-    '''
-
     data_path = os.path.join(mscoco, split)
     caption_path = os.path.join(mscoco, caption_path)
     print(data_path)
@@ -111,6 +107,16 @@ def show_examples(batch_idx, batch_size,
         #Image.fromarray(input).show()
         #Image.fromarray(target).show()
         #print i, caption_dict[cap_id]
+
+def reconstruct_image(border_pic, center_pic):
+    input = np.copy(border_pic)
+    center = (int(np.floor(input.shape[1] / 2.)), int(np.floor(input.shape[2] / 2.)))
+    input[:,center[0] - 16:center[0] + 16, center[1] - 16:center[1] + 16] = center_pic
+    return input
+
+
+
+
 
 
 
