@@ -6,6 +6,7 @@ import PIL.Image as Image
 from skimage.transform import resize
 import time
 import pickle
+import examples
 
 import theano
 import theano.tensor as T
@@ -14,14 +15,6 @@ import random
 
 import lasagne
 
-
-def scale(A, B, k):     
-    # fill A with B scaled by k
-    Y = A.shape[0]
-    X = A.shape[1]
-    for y in range(0, k):
-        for x in range(0, k):
-            A[y:Y:k, x:X:k] = B
 
 
 
@@ -50,6 +43,8 @@ def load_database(size, data_dir_input = 'inpainting/train2014cropped', data_dir
             #    raise Exception("Wrong shape :"+str(np.ma.shape(img_target)))
             #img_target = np.reshape(img_target, 1024)
             DataBaseTarget[i,:,:,:] = img_target[:,:,:]
+        if ((i+1)%1000 == 0):
+            print "Loaded "+str(i+1)+" pictures out of "+str(size)
 
     DataBaseInput = np.transpose(DataBaseInput,(0,3,1,2))
     DataBaseTarget = np.transpose(DataBaseTarget,(0,3,1,2))
@@ -165,15 +160,15 @@ def network_loss(predicted, real):
 
 def main():
     num_epochs = 1000000
-    batch_size = 200
-    val_batch_size = 20000
-    database_size = 80000
-    basicFilename ="basicConvolutionnalModel"
+    batch_size = 100
+    val_batch_size = 200
+    database_size = 1000
+    basicFilename ="basicCNN"
 
     print("Loading training database")
     DatabaseInput, DatabaseTarget = load_database(database_size,'inpainting/train2014cropped','inpainting/train2014target')
     print("Loading validation database")
-    DatabaseValInput, DatabaseValTarget = load_database(database_size,'inpainting/val2014cropped','inpainting/val2014target')
+    DatabaseValInput, DatabaseValTarget = load_database(val_batch_size,'inpainting/val2014cropped','inpainting/val2014target')
     input_var = T.tensor4('inputs')
 
     batch_input, batch_target = select_random_batch(batch_size, DatabaseInput, DatabaseTarget)
@@ -199,13 +194,14 @@ def main():
     print("Start training !")
 
     validation_error = 1
-    val_and_save_iteration = 50
+    val_and_save_iteration = 400
 
     for epoch in range(num_epochs):
 
         start_time = time.time()
 
-        batch_input, batch_target = select_random_batch(batch_size, DatabaseInput, DatabaseTarget)
+        batch_input, batch_target = select_random_batch(batch_size, DatabaseValInput, DatabaseValTarget)
+       # batch_input, batch_target = select_random_batch(batch_size, DatabaseInput, DatabaseTarget)
 
         #print("Batch created, of shape" + str(np.shape(batch_input)) +"for input  and "+ str(np.shape(batch_target))+"for target")
         [predictions] = get_network_output(batch_input)
@@ -219,14 +215,30 @@ def main():
         if epoch%val_and_save_iteration == 0:
 
             print("validation ...")
-            batch_input, batch_target = select_random_batch(val_batch_size, DatabaseValInput, DatabaseValTarget)
+
+           # batch_input, batch_target = select_random_batch(val_batch_size, DatabaseValInput, DatabaseValTarget)
+            batch_input, batch_target = DatabaseValInput, DatabaseValTarget
+
             [predictions] = get_network_output(batch_input)
             batchTarget_shared.set_value(batch_target)
             [val_err] = validation_fn(batch_target)
-            saveModel(network, basicFilename + "_ite_" + str(epoch + 1) + "_bs_" + str(batch_size) + "_val_err_" + str(val_err))
+            saveModel(network, basicFilename + "_nbPic_{}_val_err_{:.5f}".format(epoch*batch_size, val_err/val_batch_size))
             print("  validation loss:\t\t{:.6f}".format(val_err /1))
-            
-            if validation_error < val_err:
+
+            for i in range(0,10):
+                if epoch < 10:
+                    real = np.transpose((examples.reconstruct_image(batch_input[i,:,:,:], batch_target[i,:,:,:])*256).astype('uint8'),(1,2,0))
+                    imgReal = Image.fromarray(real)
+                    imgReal.save("inpainting/visualExamples/" + basicFilename + str(i) + "_nbPic_{}_Real.jpg".format(
+                        epoch * batch_size))
+                res = np.transpose((examples.reconstruct_image(batch_input[i, :, :, :], predictions[i, :, :, :]) * 256).astype('uint8'), (1, 2, 0))
+
+                imgRes = Image.fromarray(res)
+
+                imgRes.save("inpainting/visualExamples/" + basicFilename + str(i) +"_nbPic_{}_Res.jpg".format(epoch*batch_size))
+
+
+            if validation_error < val_err+1:
                 validation_error = val_err
             else:
                 print "Validation error growing... Stoping training"
