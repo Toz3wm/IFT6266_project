@@ -43,7 +43,7 @@ def load_database(size, data_dir_input = 'inpainting/train2014cropped', data_dir
             #    raise Exception("Wrong shape :"+str(np.ma.shape(img_target)))
             #img_target = np.reshape(img_target, 1024)
             DataBaseTarget[i,:,:,:] = img_target[:,:,:]
-        if ((i+1)%1000 == 0):
+        if ((i+1)%50 == 0):
             print "Loaded "+str(i+1)+" pictures out of "+str(size)
 
     DataBaseInput = np.transpose(DataBaseInput,(0,3,1,2))
@@ -160,10 +160,16 @@ def network_loss(predicted, real):
 
 def main():
     num_epochs = 1000000
-    batch_size = 100
-    val_batch_size = 200
-    database_size = 1000
-    basicFilename ="basicCNN"
+    batch_size = 150
+    val_batch_size = 500
+    database_size = 40000
+    validation_error = 1
+    val_iteration = 100
+    save_iteration = 20000
+
+    basicFilename ="basicCNN2"
+    loading = True
+    filename = "basicCNN_nbPic_6080000_val_err_0.00015pickle"
 
     print("Loading training database")
     DatabaseInput, DatabaseTarget = load_database(database_size,'inpainting/train2014cropped','inpainting/train2014target')
@@ -186,46 +192,61 @@ def main():
     #loss = network_loss(prediction, DataBaseTarget_shared)
 
     params = lasagne.layers.get_all_params(network, trainable=True)
-    updates = lasagne.updates.adagrad(loss, params, learning_rate=0.001)
+    updates = lasagne.updates.adam(loss, params, learning_rate=0.001)
 
     train_fn = theano.function([input_var], [loss], updates=updates)
     validation_fn = theano.function([input_var],[loss])
 
+    if loading:
+        loadModel(network,filename)
+
+
     print("Start training !")
 
-    validation_error = 1
-    val_and_save_iteration = 400
+    train_error_list = ""
+    val_error_list = ""
 
     for epoch in range(num_epochs):
 
         start_time = time.time()
 
-        batch_input, batch_target = select_random_batch(batch_size, DatabaseValInput, DatabaseValTarget)
-       # batch_input, batch_target = select_random_batch(batch_size, DatabaseInput, DatabaseTarget)
 
-        #print("Batch created, of shape" + str(np.shape(batch_input)) +"for input  and "+ str(np.shape(batch_target))+"for target")
+        batch_input, batch_target = select_random_batch(batch_size, DatabaseInput, DatabaseTarget)        
         [predictions] = get_network_output(batch_input)
-
         batchTarget_shared.set_value(batch_target)
         [train_err] = train_fn(batch_input)
 
         print("Epoch {} of {} took {:.3f}s".format(
                 epoch + 1, num_epochs, time.time() - start_time))
         print("  training loss:\t\t{:.6f}".format(train_err /1))
-        if epoch%val_and_save_iteration == 0:
+
+        train_error_list += "{}, {:.8f} \n".format(epoch+1, train_err/1)
+
+        if epoch%val_iteration == 0:
 
             print("validation ...")
-
            # batch_input, batch_target = select_random_batch(val_batch_size, DatabaseValInput, DatabaseValTarget)
             batch_input, batch_target = DatabaseValInput, DatabaseValTarget
 
             [predictions] = get_network_output(batch_input)
             batchTarget_shared.set_value(batch_target)
             [val_err] = validation_fn(batch_target)
-            saveModel(network, basicFilename + "_nbPic_{}_val_err_{:.5f}".format(epoch*batch_size, val_err/val_batch_size))
-            print("  validation loss:\t\t{:.6f}".format(val_err /1))
 
-            for i in range(0,10):
+            print("  validation loss:\t\t{:.6f}".format(val_err /1))
+            val_error_list += "{}, {:.8f} \n".format(epoch + 1, val_err / 1)
+
+            if epoch%save_iteration == 0:
+                saveModel(network, basicFilename + "_nbPic_{}_val_err_{:.5f}".format(epoch * batch_size,
+                                                                                     val_err / val_batch_size))
+                with open(basicFilename+'train_err.txt', 'a') as file:
+                    file.write(train_error_list)
+                train_error_list = ""
+                with open(basicFilename+'val_err.txt', 'a') as file:
+                    file.write(val_error_list)
+                val_error_list = ""
+
+            print "creating visual examples from validation dataset"
+            for i in range(0,50):
                 if epoch < 10:
                     real = np.transpose((examples.reconstruct_image(batch_input[i,:,:,:], batch_target[i,:,:,:])*256).astype('uint8'),(1,2,0))
                     imgReal = Image.fromarray(real)
@@ -245,10 +266,6 @@ def main():
                 break
 
 
-
-        # if epoch % 100 == 0:
-        #    np.savez('model.npz', *lasagne.layers.get_all_param_values(network))
-
     print("Training done !")
 
 
@@ -261,9 +278,13 @@ def saveModel(network, filename):
 
 def loadModel(network, filename):
     values = None
-    with open(filename+"pickle", 'rb') as handle:
+    with open(filename, 'rb') as handle:
         values = pickle.load(handle)
     lasagne.layers.set_all_param_values(network, values)
+    print "succesfully loaded"
     i = 0
     
-main()
+
+
+if __name__ == '__main__':
+    main()
