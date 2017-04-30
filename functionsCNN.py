@@ -10,6 +10,7 @@ import examples
 
 import theano
 import theano.tensor as T
+from theano import function
 from theano import shared
 import random
 
@@ -18,7 +19,7 @@ import lasagne
 
 
 
-def load_database(size, data_dir_input = 'inpainting/train2014cropped', data_dir_target = 'inpainting/train2014target'):
+def load_database(size, startpoint, data_dir_input = 'inpainting/train2014cropped', data_dir_target = 'inpainting/train2014target'):
     """
     creates a list of batch_size pictures, randomly chosen
     batch_size should be set to train set size, but for testing reason is default = 5
@@ -29,7 +30,8 @@ def load_database(size, data_dir_input = 'inpainting/train2014cropped', data_dir
     imgsTarget = glob.glob(data_dir_target+"/*.jpg")
     if not len(imgsInput) == len(imgsTarget):
         raise Exception("inputs and target are not the same size !")
-    for i in range(size):
+    for j in range(startpoint, size+startpoint):
+        i = j - startpoint
         img_path_input = imgsInput[i] 
         img_input = Image.open(img_path_input)
         img_input = np.asarray(img_input, dtype='float32') / 256.
@@ -138,7 +140,7 @@ def build_cnn(input_var=None):
     network = upscale1_layer2
 
     # transpose conv layer to reconstruct, with sigmoid output
-    deconv3_layer = lasagne.layers.TransposedConv2DLayer(network, 3, (5, 5), stride=(1, 1),nonlinearity=lasagne.nonlinearities.sigmoid)
+    deconv3_layer = lasagne.layers.TransposedConv2DLayer(network, 3, (5, 5), stride=(1, 1),nonlinearity=lasagne.nonlinearities.rectify)
     print(deconv3_layer.output_shape)
     network = deconv3_layer
 
@@ -161,20 +163,22 @@ def network_loss(predicted, real):
 def main():
     num_epochs = 1000000
     batch_size = 150
-    val_batch_size = 500
-    database_size = 40000
+    val_batch_size = 600
+    startpoint = 1
+    valstartpoint = 10000
+    database_size = 30000
     validation_error = 1
-    val_iteration = 100
-    save_iteration = 20000
+    val_iteration = 5000
+    save_iteration = 10000
 
-    basicFilename ="basicCNN2"
+    basicFilename = "CNN_ReLu2_"
     loading = True
-    filename = "basicCNN_nbPic_6080000_val_err_0.00015pickle"
+    filename = "models/CNN_ReLu__nbPic_10500000_val_err_0.00018pickle"
 
     print("Loading training database")
-    DatabaseInput, DatabaseTarget = load_database(database_size,'inpainting/train2014cropped','inpainting/train2014target')
+    DatabaseInput, DatabaseTarget = load_database(database_size, startpoint,'inpainting/train2014cropped','inpainting/train2014target')
     print("Loading validation database")
-    DatabaseValInput, DatabaseValTarget = load_database(val_batch_size,'inpainting/val2014cropped','inpainting/val2014target')
+    DatabaseValInput, DatabaseValTarget = load_database(val_batch_size, valstartpoint,'inpainting/val2014cropped','inpainting/val2014target')
     input_var = T.tensor4('inputs')
 
     batch_input, batch_target = select_random_batch(batch_size, DatabaseInput, DatabaseTarget)
@@ -183,16 +187,20 @@ def main():
     network = build_cnn(input_var)
 
     prediction = lasagne.layers.get_output(network)
+
+    linMin = T.minimum(prediction,1.)
    # print("output of the network :")
    # print(lasagne.utils.as_theano_expression(prediction).get_shape())
-    get_network_output = theano.function([input_var], [prediction],allow_input_downcast=True)
+
+    get_network_output = theano.function([input_var], [linMin],allow_input_downcast=True)
 
     batchTarget_shared = shared(batch_target)
-    loss = T.mean(lasagne.objectives.squared_error(prediction,batchTarget_shared))
+
+    loss = T.mean(lasagne.objectives.squared_error(linMin,batchTarget_shared))
     #loss = network_loss(prediction, DataBaseTarget_shared)
 
     params = lasagne.layers.get_all_params(network, trainable=True)
-    updates = lasagne.updates.adam(loss, params, learning_rate=0.001)
+    updates = lasagne.updates.adam(loss, params, learning_rate=0.0004)
 
     train_fn = theano.function([input_var], [loss], updates=updates)
     validation_fn = theano.function([input_var],[loss])
@@ -236,12 +244,13 @@ def main():
             val_error_list += "{}, {:.8f} \n".format(epoch + 1, val_err / 1)
 
             if epoch%save_iteration == 0:
-                saveModel(network, basicFilename + "_nbPic_{}_val_err_{:.5f}".format(epoch * batch_size,
+                print("saving model")
+                saveModel(network, "models/"+basicFilename + "_nbPic_{}_val_err_{:.5f}".format(epoch * batch_size,
                                                                                      val_err / val_batch_size))
-                with open(basicFilename+'train_err.txt', 'a') as file:
+                with open("models/"+basicFilename+'train_err.txt', 'a') as file:
                     file.write(train_error_list)
                 train_error_list = ""
-                with open(basicFilename+'val_err.txt', 'a') as file:
+                with open("models/"+basicFilename+'val_err.txt', 'a') as file:
                     file.write(val_error_list)
                 val_error_list = ""
 
